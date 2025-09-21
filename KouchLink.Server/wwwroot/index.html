@@ -1,0 +1,66 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Joystick P2</title>
+</head>
+<body>
+    <h1>Joystick P2</h1>
+    <button onclick="send('u')">u</button>
+    <button onclick="send('d')">d</button>
+    <button onclick="send('l')">l</button>
+    <button onclick="send('r')">r</button>
+
+    <br>
+    <br>
+    <br>
+    <br>
+
+    <button onclick="send('A')">A</button>
+    <button onclick="send('B')">B</button>
+    <button onclick="send('X')">X</button>
+    <button onclick="send('Y')">Y</button>
+
+    <script>
+        const host = window.location.host;  // e.g. "localhost:5000" 或 "example.com:8080"
+
+        const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const ws = new WebSocket(`${protocol}://${host}/client`);
+
+        ws.onopen = () => console.log("Connected to server");
+
+        function send(button) {
+            if (ws.readyState === WebSocket.OPEN) {
+                const msg = createMsg(button)
+                ws.send(msg);
+                console.log(msg)
+            }
+        }
+
+        function createMsg(btn) {
+
+            let lx = 0;
+            let ly = 0;
+
+            if (btn === "u") ly = 16383;
+            if (btn === "d") ly = -16383;
+            if (btn === "l") lx = -16383;
+            if (btn === "r") lx = 16383;
+
+            const aObj = {
+                axes: {
+                    ly: ly,
+                    lx: lx
+                },
+                buttons: {
+                    A: btn === "A",
+                    B: btn === "B",
+                    X: btn === "X",
+                    Y: btn === "Y"
+                }
+            };
+            return JSON.stringify(aObj);
+        }
+    </script>
+</body>
+</html>

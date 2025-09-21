@@ -1,16 +1,122 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
+﻿using KouchLink.Common.Data;
+using Nefarius.ViGEm.Client;
+using Nefarius.ViGEm.Client.Targets;
+using Nefarius.ViGEm.Client.Targets.Xbox360;
+using Newtonsoft.Json;
+using System;
+using System.Timers;
+using WebSocketSharp;
 
 namespace KouchLink.Host
 {
     internal class Program
     {
+        private static ViGEmClient client;
+        private static IXbox360Controller controller;
+
         static void Main(string[] args)
         {
+            // 初始化虛擬手把
+            client = new ViGEmClient();
+            controller = client.CreateXbox360Controller();
+            controller.Connect();
 
+            var manager = new Xbox360ControllerManager(controller);
+
+            Console.WriteLine("Host? eg.ws://localhost:5000/host");
+            string serverUri = Console.ReadLine(); //"ws://localhost:5000/host"; // 指向你的 ASP.NET Core server
+            using (var ws = new WebSocket(serverUri))
+            {
+                ws.OnOpen += (sender, e) =>
+                {
+                    Console.WriteLine("Connected to server!");
+                };
+
+                ws.OnMessage += (sender, e) =>
+                {
+                    try
+                    {
+                        Console.WriteLine(e.Data);
+                        var data = JsonConvert.DeserializeObject<JoystickData>(e.Data);
+                        if (data != null)
+                        {
+                            manager.Update(data);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine("Error: " + ex.Message);
+                    }
+                };
+
+                ws.OnClose += (sender, e) =>
+                {
+                    Console.WriteLine("Connection closed.");
+                };
+
+                ws.Connect();
+
+                Console.WriteLine("Press Enter to exit...");
+                Console.ReadLine();
+            }
+        }
+
+        private class Xbox360ControllerManager
+        {
+            private readonly IXbox360Controller controller;
+            private readonly Timer timer;
+            private DateTime lastReceived;
+            private readonly int timeoutMs;
+
+            public Xbox360ControllerManager(IXbox360Controller controller, int timeoutMilliseconds = 5)
+            {
+                this.controller = controller;
+                this.timeoutMs = timeoutMilliseconds;
+                lastReceived = DateTime.MinValue;
+
+                timer = new Timer(1); // 每 1ms 檢查一次
+                timer.AutoReset = true;
+                timer.Elapsed += Timer_Elapsed;
+                timer.Start();
+            }
+
+            private void Timer_Elapsed(object sender, ElapsedEventArgs e)
+            {
+                if ((DateTime.Now - lastReceived).TotalMilliseconds > timeoutMs)
+                {
+                    ResetController();
+                }
+            }
+
+            public void Update(JoystickData data)
+            {
+                lastReceived = DateTime.Now;
+
+                // 更新搖桿軸
+                controller.SetAxisValue(Xbox360Axis.LeftThumbX, data.axes.lx);
+                controller.SetAxisValue(Xbox360Axis.LeftThumbY, data.axes.ly);
+                controller.SetAxisValue(Xbox360Axis.RightThumbX, data.axes.rx);
+                controller.SetAxisValue(Xbox360Axis.RightThumbY, data.axes.ry);
+
+                // 更新按鈕
+                controller.SetButtonState(Xbox360Button.A, data.buttons.A);
+                controller.SetButtonState(Xbox360Button.B, data.buttons.B);
+                controller.SetButtonState(Xbox360Button.X, data.buttons.X);
+                controller.SetButtonState(Xbox360Button.Y, data.buttons.Y);
+            }
+
+            private void ResetController()
+            {
+                controller.SetAxisValue(Xbox360Axis.LeftThumbX, 0);
+                controller.SetAxisValue(Xbox360Axis.LeftThumbY, 0);
+                controller.SetAxisValue(Xbox360Axis.RightThumbX, 0);
+                controller.SetAxisValue(Xbox360Axis.RightThumbY, 0);
+
+                controller.SetButtonState(Xbox360Button.A, false);
+                controller.SetButtonState(Xbox360Button.B, false);
+                controller.SetButtonState(Xbox360Button.X, false);
+                controller.SetButtonState(Xbox360Button.Y, false);
+            }
         }
     }
 }
