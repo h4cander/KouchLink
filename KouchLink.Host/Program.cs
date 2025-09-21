@@ -4,8 +4,11 @@ using Nefarius.ViGEm.Client.Targets;
 using Nefarius.ViGEm.Client.Targets.Xbox360;
 using Newtonsoft.Json;
 using System;
+using System.Net.WebSockets;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Timers;
-using WebSocketSharp;
 
 namespace KouchLink.Host
 {
@@ -23,38 +26,63 @@ namespace KouchLink.Host
 
             var manager = new Xbox360ControllerManager(controller);
 
-            Console.WriteLine("Host? eg.ws://localhost:5000/host");
+            Console.WriteLine("Host? eg.ws://localhost:5000/host or wss://localhost:5000/host");
             string serverUri = Console.ReadLine(); //"ws://localhost:5000/host"; // 指向你的 ASP.NET Core server
-            using (var ws = new WebSocket(serverUri))
-            {
-                ws.OnOpen += (sender, e) =>
-                {
-                    Console.WriteLine("Connected to server!");
-                };
 
-                ws.OnMessage += (sender, e) =>
+            ExecuteAsync(serverUri, manager).GetAwaiter().GetResult();
+        }
+
+        private static async Task ExecuteAsync(string serverUri, Xbox360ControllerManager manager)
+        {
+            using (ClientWebSocket ws = new ClientWebSocket())
+            {
+                try
                 {
+                    await ws.ConnectAsync(new Uri(serverUri), CancellationToken.None);
+
+                    Console.WriteLine("Connected!");
+                    
+                    var buffer = new byte[1024];
+
                     try
                     {
-                        Console.WriteLine(e.Data);
-                        var data = JsonConvert.DeserializeObject<JoystickData>(e.Data);
-                        if (data != null)
+                        while (ws.State == WebSocketState.Open)
                         {
-                            manager.Update(data);
+                            var result = await ws.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+
+                            if (result.MessageType == WebSocketMessageType.Close)
+                            {
+                                Console.WriteLine("Server closed connection.");
+                                await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "Closing", CancellationToken.None);
+                            }
+                            else
+                            {
+                                try
+                                {
+                                    string message = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                                    Console.WriteLine(message);
+                                    var data = JsonConvert.DeserializeObject<JoystickData>(message);
+                                    if (data != null)
+                                    {
+                                        manager.Update(data);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine("Error: " + ex.Message);
+                                }
+                            }
                         }
                     }
                     catch (Exception ex)
                     {
-                        Console.WriteLine("Error: " + ex.Message);
+                        Console.WriteLine("Receive error: " + ex.Message);
                     }
-                };
-
-                ws.OnClose += (sender, e) =>
+                }
+                catch (Exception ex)
                 {
-                    Console.WriteLine("Connection closed.");
-                };
-
-                ws.Connect();
+                    Console.WriteLine("Error: " + ex.Message);
+                }
 
                 Console.WriteLine("Press Enter to exit...");
                 Console.ReadLine();
@@ -64,17 +92,17 @@ namespace KouchLink.Host
         private class Xbox360ControllerManager
         {
             private readonly IXbox360Controller controller;
-            private readonly Timer timer;
+            private readonly System.Timers.Timer timer;
             private DateTime lastReceived;
             private readonly int timeoutMs;
 
-            public Xbox360ControllerManager(IXbox360Controller controller, int timeoutMilliseconds = 5)
+            public Xbox360ControllerManager(IXbox360Controller controller, int timeoutMilliseconds = 10)
             {
                 this.controller = controller;
                 this.timeoutMs = timeoutMilliseconds;
                 lastReceived = DateTime.MinValue;
 
-                timer = new Timer(1); // 每 1ms 檢查一次
+                timer = new System.Timers.Timer(1); // 每 1ms 檢查一次
                 timer.AutoReset = true;
                 timer.Elapsed += Timer_Elapsed;
                 timer.Start();
